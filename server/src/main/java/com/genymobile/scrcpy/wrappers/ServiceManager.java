@@ -10,8 +10,6 @@ import android.os.IInterface;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
-import android.app.IActivityManager;
-
 
 @SuppressLint("PrivateApi,DiscouragedPrivateApi")
 public final class ServiceManager {
@@ -42,6 +40,9 @@ public final class ServiceManager {
     static IInterface getService(String service, String type) {
         try {
             IBinder binder = (IBinder) GET_SERVICE_METHOD.invoke(null, service);
+            if (binder == null) {
+                return null;
+            }
             Method asInterfaceMethod = Class.forName(type + "$Stub").getMethod("asInterface", IBinder.class);
             return (IInterface) asInterfaceMethod.invoke(null, binder);
         } catch (Exception e) {
@@ -94,15 +95,23 @@ public final class ServiceManager {
 
     public static ActivityManager getActivityManager() {
         if (activityManager == null) {
-            activityManager = new ActivityManager(getIActivityManager());
+            activityManager = ActivityManager.create();
         }
         return activityManager;
     }
 
-    private static IActivityManager getIActivityManager() {
-        return IActivityManager.Stub.asInterface((IBinder) GET_SERVICE_METHOD.invoke(null, "activity"));
+    // Remove direct reference to IActivityManager
+    private static Object getIActivityManager() {
+        try {
+            // Using reflection to get the Activity Manager service
+            IBinder binder = (IBinder) GET_SERVICE_METHOD.invoke(null, "activity");
+            Class<?> iActivityManagerStubClass = Class.forName("android.app.IActivityManager$Stub");
+            Method asInterfaceMethod = iActivityManagerStubClass.getMethod("asInterface", IBinder.class);
+            return asInterfaceMethod.invoke(null, binder);
+        } catch (Exception e) {
+            throw new AssertionError("Could not get IActivityManager", e);
+        }
     }
-
 
     public static CameraManager getCameraManager() {
         if (cameraManager == null) {
