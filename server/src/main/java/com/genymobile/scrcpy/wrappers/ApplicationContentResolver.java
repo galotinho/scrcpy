@@ -1,42 +1,38 @@
 package com.genymobile.scrcpy.wrappers;
 
 import android.annotation.SuppressLint;
-import android.app.ActivityThread;
 import android.content.ContentProvider;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.content.IContentProvider;
 import android.os.Binder;
-import android.os.Build;
 import android.os.IBinder;
 
 import com.genymobile.scrcpy.Ln;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Objects;
 
 public class ApplicationContentResolver extends ContentResolver {
-    private final ActivityThread mMainThread;
+    private final Object mMainThread;
 
-    public ApplicationContentResolver(Context context, ActivityThread mainThread) {
+    public ApplicationContentResolver(Context context, Object mainThread) {
         super(context);
         mMainThread = Objects.requireNonNull(mainThread);
     }
 
     @Override
-    protected IContentProvider acquireProvider(Context context, String auth) {
-        return ServiceManager.getActivityManager().getContentProviderExternal(ContentProvider.getAuthorityWithoutUserId(auth), new Binder());
+    protected Object acquireProvider(Context context, String auth) {
+        return ServiceManager.getActivityManager().getContentProviderExternal(auth, new Binder());
     }
 
     @Override
-    protected IContentProvider acquireExistingProvider(Context context, String auth) {
-        // Nunca é chamado, mas implementado para compatibilidade
+    protected Object acquireExistingProvider(Context context, String auth) {
+        // Implemented for compatibility, though it may not be called
         try {
-            Method method = ActivityThread.class.getDeclaredMethod("acquireExistingProvider", Context.class, String.class, int.class, boolean.class);
+            Class<?> activityThreadClass = mMainThread.getClass();
+            Method method = activityThreadClass.getDeclaredMethod("acquireExistingProvider", Context.class, String.class, int.class, boolean.class);
             method.setAccessible(true);
-            return (IContentProvider) method.invoke(mMainThread, context, ContentProvider.getAuthorityWithoutUserId(auth), resolveUserIdFromAuthority(auth), true);
+            return method.invoke(mMainThread, context, auth, resolveUserIdFromAuthority(auth), true);
         } catch (Exception e) {
             Ln.e("Could not invoke acquireExistingProvider", e);
             return null;
@@ -44,10 +40,11 @@ public class ApplicationContentResolver extends ContentResolver {
     }
 
     @Override
-    public boolean releaseProvider(IContentProvider provider) {
-        // Talvez seja necessário liberar o ContentProviderExternal
+    public boolean releaseProvider(Object provider) {
+        // May need to release the ContentProviderExternal
         try {
-            Method method = ActivityThread.class.getDeclaredMethod("releaseProvider", IContentProvider.class, boolean.class);
+            Class<?> activityThreadClass = mMainThread.getClass();
+            Method method = activityThreadClass.getDeclaredMethod("releaseProvider", Class.forName("android.content.IContentProvider"), boolean.class);
             method.setAccessible(true);
             return (boolean) method.invoke(mMainThread, provider, true);
         } catch (Exception e) {
@@ -57,16 +54,17 @@ public class ApplicationContentResolver extends ContentResolver {
     }
 
     @Override
-    protected IContentProvider acquireUnstableProvider(Context context, String auth) {
-        // Atualizado para tratar chamadas do ClipboardManager
-        return ServiceManager.getActivityManager().getContentProviderExternal(ContentProvider.getAuthorityWithoutUserId(auth), new Binder());
+    protected Object acquireUnstableProvider(Context context, String auth) {
+        // Updated to handle calls from ClipboardManager
+        return ServiceManager.getActivityManager().getContentProviderExternal(auth, new Binder());
     }
 
     @Override
-    public boolean releaseUnstableProvider(IContentProvider icp) {
-        // Talvez seja necessário liberar o ContentProviderExternal
+    public boolean releaseUnstableProvider(Object icp) {
+        // May need to release the ContentProviderExternal
         try {
-            Method method = ActivityThread.class.getDeclaredMethod("releaseProvider", IContentProvider.class, boolean.class);
+            Class<?> activityThreadClass = mMainThread.getClass();
+            Method method = activityThreadClass.getDeclaredMethod("releaseProvider", Class.forName("android.content.IContentProvider"), boolean.class);
             method.setAccessible(true);
             return (boolean) method.invoke(mMainThread, icp, false);
         } catch (Exception e) {
@@ -77,11 +75,14 @@ public class ApplicationContentResolver extends ContentResolver {
 
     @SuppressLint("DiscouragedPrivateApi")
     @Override
-    public void unstableProviderDied(IContentProvider icp) {
+    public void unstableProviderDied(Object icp) {
         try {
-            Method method = ActivityThread.class.getDeclaredMethod("handleUnstableProviderDied", IBinder.class, boolean.class);
+            Class<?> activityThreadClass = mMainThread.getClass();
+            Method method = activityThreadClass.getDeclaredMethod("handleUnstableProviderDied", IBinder.class, boolean.class);
             method.setAccessible(true);
-            method.invoke(mMainThread, icp.asBinder(), true);
+            Method asBinderMethod = icp.getClass().getMethod("asBinder");
+            IBinder binder = (IBinder) asBinderMethod.invoke(icp);
+            method.invoke(mMainThread, binder, true);
         } catch (Exception e) {
             Ln.e("Could not invoke unstableProviderDied", e);
         }
@@ -89,11 +90,14 @@ public class ApplicationContentResolver extends ContentResolver {
 
     @SuppressLint("SoonBlockedPrivateApi")
     @Override
-    public void appNotRespondingViaProvider(IContentProvider icp) {
+    public void appNotRespondingViaProvider(Object icp) {
         try {
-            Method method = ActivityThread.class.getDeclaredMethod("appNotRespondingViaProvider", IBinder.class);
+            Class<?> activityThreadClass = mMainThread.getClass();
+            Method method = activityThreadClass.getDeclaredMethod("appNotRespondingViaProvider", IBinder.class);
             method.setAccessible(true);
-            method.invoke(mMainThread, icp.asBinder());
+            Method asBinderMethod = icp.getClass().getMethod("asBinder");
+            IBinder binder = (IBinder) asBinderMethod.invoke(icp);
+            method.invoke(mMainThread, binder);
         } catch (Exception e) {
             Ln.e("Could not invoke appNotRespondingViaProvider", e);
         }
