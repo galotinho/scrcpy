@@ -10,6 +10,8 @@ import android.os.IInterface;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import android.app.IActivityManager;
+
 
 @SuppressLint("PrivateApi,DiscouragedPrivateApi")
 public final class ServiceManager {
@@ -92,10 +94,15 @@ public final class ServiceManager {
 
     public static ActivityManager getActivityManager() {
         if (activityManager == null) {
-            activityManager = ActivityManager.create();
+            activityManager = new ActivityManager(getIActivityManager());
         }
         return activityManager;
     }
+
+    private static IActivityManager getIActivityManager() {
+        return IActivityManager.Stub.asInterface((IBinder) GET_SERVICE_METHOD.invoke(null, "activity"));
+    }
+
 
     public static CameraManager getCameraManager() {
         if (cameraManager == null) {

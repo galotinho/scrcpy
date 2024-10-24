@@ -11,6 +11,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.IInterface;
+import android.content.IContentProvider;
+import android.app.IActivityManager;
+
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -25,7 +28,7 @@ public final class ActivityManager {
     private Method startActivityAsUserMethod;
     private Method forceStopPackageMethod;
 
-    static ActivityManager create() {
+        static ActivityManager create() {
         try {
             // On old Android versions, the ActivityManager is not exposed via AIDL,
             // so use ActivityManagerNative.getDefault()
@@ -42,20 +45,73 @@ public final class ActivityManager {
         this.manager = manager;
     }
 
+    public IContentProvider getContentProviderExternal(String name, IBinder token) {
+        try {
+            Method method = getGetContentProviderExternalMethod();
+            Object[] args;
+            if (getContentProviderExternalMethodNewVersion) {
+                // Nova versão
+                args = new Object[]{name, FakeContext.ROOT_UID, token, null};
+            } else {
+                // Versão antiga
+                args = new Object[]{name, FakeContext.ROOT_UID, token};
+            }
+            // ContentProviderHolder providerHolder = getContentProviderExternal(...);
+            Object providerHolder = method.invoke(manager, args);
+            if (providerHolder == null) {
+                return null;
+            }
+            // IContentProvider provider = providerHolder.provider;
+            Field providerField = providerHolder.getClass().getDeclaredField("provider");
+            providerField.setAccessible(true);
+            Object provider = providerField.get(providerHolder);
+            return (IContentProvider) provider;
+        } catch (ReflectiveOperationException e) {
+            Ln.e("Could not invoke method", e);
+            return null;
+        }
+    }
+
+    private ContentProvider getContentProviderExternalInternal(String name, IBinder token) {
+        IContentProvider provider = getContentProviderExternal(name, token);
+        return new ContentProvider(this, provider, name, token);
+    }
+
+    void removeContentProviderExternal(String name, IBinder token) {
+        try {
+            Method method = getRemoveContentProviderExternalMethod();
+            method.invoke(manager, name, token);
+        } catch (ReflectiveOperationException e) {
+            Ln.e("Could not invoke method", e);
+        }
+    }
+
+    public ContentProvider createSettingsProvider() {
+        return getContentProviderExternalInternal("settings", new Binder());
+    }
+
     private Method getGetContentProviderExternalMethod() throws NoSuchMethodException {
         if (getContentProviderExternalMethod == null) {
-            try {
-                getContentProviderExternalMethod = manager.getClass()
-                        .getMethod("getContentProviderExternal", String.class, int.class, IBinder.class, String.class);
-            } catch (NoSuchMethodException e) {
-                // old version
-                getContentProviderExternalMethod = manager.getClass().getMethod("getContentProviderExternal", String.class, int.class, IBinder.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Método com assinatura diferente em versões mais recentes
+                getContentProviderExternalMethod = IActivityManager.class.getMethod("getContentProviderExternal", String.class, int.class, IBinder.class, String.class);
+                getContentProviderExternalMethodNewVersion = true;
+            } else {
+                getContentProviderExternalMethod = IActivityManager.class.getMethod("getContentProviderExternal", String.class, int.class, IBinder.class);
                 getContentProviderExternalMethodNewVersion = false;
             }
         }
         return getContentProviderExternalMethod;
     }
 
+    private Method getRemoveContentProviderExternalMethod() throws NoSuchMethodException {
+        if (removeContentProviderExternalMethod == null) {
+            removeContentProviderExternalMethod = IActivityManager.class.getMethod("removeContentProviderExternal", String.class, IBinder.class);
+        }
+        return removeContentProviderExternalMethod;
+    }
+
+   
     private Method getRemoveContentProviderExternalMethod() throws NoSuchMethodException {
         if (removeContentProviderExternalMethod == null) {
             removeContentProviderExternalMethod = manager.getClass().getMethod("removeContentProviderExternal", String.class, IBinder.class);
