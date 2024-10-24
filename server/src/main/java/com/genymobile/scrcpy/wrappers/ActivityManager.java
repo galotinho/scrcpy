@@ -1,7 +1,7 @@
 package com.genymobile.scrcpy.wrappers;
 
 import com.genymobile.scrcpy.FakeContext;
-import com.genymobile.scrcpy.util.Ln;
+import com.genymobile.scrcpy.Ln;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
@@ -11,9 +11,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.IInterface;
-import android.content.IContentProvider;
-import android.app.IActivityManager;
-
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -21,31 +18,41 @@ import java.lang.reflect.Method;
 @SuppressLint("PrivateApi,DiscouragedPrivateApi")
 public final class ActivityManager {
 
-    private final IInterface manager;
+    private final Object manager;
     private Method getContentProviderExternalMethod;
     private boolean getContentProviderExternalMethodNewVersion = true;
     private Method removeContentProviderExternalMethod;
     private Method startActivityAsUserMethod;
     private Method forceStopPackageMethod;
 
-        static ActivityManager create() {
+    public static ActivityManager create() {
         try {
-            // On old Android versions, the ActivityManager is not exposed via AIDL,
-            // so use ActivityManagerNative.getDefault()
-            Class<?> cls = Class.forName("android.app.ActivityManagerNative");
-            Method getDefaultMethod = cls.getDeclaredMethod("getDefault");
-            IInterface am = (IInterface) getDefaultMethod.invoke(null);
+            // Em versões antigas do Android, o ActivityManager não é exposto via AIDL,
+            // então usamos ActivityManagerNative.getDefault()
+            Class<?> activityManagerNativeClass = Class.forName("android.app.ActivityManagerNative");
+            Method getDefaultMethod = activityManagerNativeClass.getDeclaredMethod("getDefault");
+            Object am = getDefaultMethod.invoke(null);
             return new ActivityManager(am);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError(e);
+        } catch (ClassNotFoundException e) {
+            // Em versões mais recentes, usamos ActivityManager.getService()
+            try {
+                Class<?> activityManagerClass = Class.forName("android.app.ActivityManager");
+                Method getServiceMethod = activityManagerClass.getDeclaredMethod("getService");
+                Object am = getServiceMethod.invoke(null);
+                return new ActivityManager(am);
+            } catch (Exception ex) {
+                throw new AssertionError("Could not get ActivityManager", ex);
+            }
+        } catch (Exception e) {
+            throw new AssertionError("Could not get ActivityManager", e);
         }
     }
 
-    private ActivityManager(IInterface manager) {
+    private ActivityManager(Object manager) {
         this.manager = manager;
     }
 
-    public IContentProvider getContentProviderExternal(String name, IBinder token) {
+    public Object getContentProviderExternal(String name, IBinder token) {
         try {
             Method method = getGetContentProviderExternalMethod();
             Object[] args;
@@ -61,28 +68,27 @@ public final class ActivityManager {
             if (providerHolder == null) {
                 return null;
             }
-            // IContentProvider provider = providerHolder.provider;
+            // Obter o campo 'provider' de providerHolder
             Field providerField = providerHolder.getClass().getDeclaredField("provider");
             providerField.setAccessible(true);
-            Object provider = providerField.get(providerHolder);
-            return (IContentProvider) provider;
-        } catch (ReflectiveOperationException e) {
-            Ln.e("Could not invoke method", e);
+            return providerField.get(providerHolder);
+        } catch (Exception e) {
+            Ln.e("Could not invoke getContentProviderExternal", e);
             return null;
         }
     }
 
     private ContentProvider getContentProviderExternalInternal(String name, IBinder token) {
-        IContentProvider provider = getContentProviderExternal(name, token);
+        Object provider = getContentProviderExternal(name, token);
         return new ContentProvider(this, provider, name, token);
     }
 
-    void removeContentProviderExternal(String name, IBinder token) {
+    public void removeContentProviderExternal(String name, IBinder token) {
         try {
             Method method = getRemoveContentProviderExternalMethod();
             method.invoke(manager, name, token);
-        } catch (ReflectiveOperationException e) {
-            Ln.e("Could not invoke method", e);
+        } catch (Exception e) {
+            Ln.e("Could not invoke removeContentProviderExternal", e);
         }
     }
 
@@ -92,12 +98,23 @@ public final class ActivityManager {
 
     private Method getGetContentProviderExternalMethod() throws NoSuchMethodException {
         if (getContentProviderExternalMethod == null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Método com assinatura diferente em versões mais recentes
-                getContentProviderExternalMethod = IActivityManager.class.getMethod("getContentProviderExternal", String.class, int.class, IBinder.class, String.class);
+            Class<?> iActivityManagerClass = manager.getClass();
+            try {
+                // Tentar método com assinatura mais recente
+                getContentProviderExternalMethod = iActivityManagerClass.getMethod(
+                        "getContentProviderExternal",
+                        String.class,
+                        int.class,
+                        IBinder.class,
+                        String.class);
                 getContentProviderExternalMethodNewVersion = true;
-            } else {
-                getContentProviderExternalMethod = IActivityManager.class.getMethod("getContentProviderExternal", String.class, int.class, IBinder.class);
+            } catch (NoSuchMethodException e) {
+                // Usar método com assinatura antiga
+                getContentProviderExternalMethod = iActivityManagerClass.getMethod(
+                        "getContentProviderExternal",
+                        String.class,
+                        int.class,
+                        IBinder.class);
                 getContentProviderExternalMethodNewVersion = false;
             }
         }
@@ -106,70 +123,32 @@ public final class ActivityManager {
 
     private Method getRemoveContentProviderExternalMethod() throws NoSuchMethodException {
         if (removeContentProviderExternalMethod == null) {
-            removeContentProviderExternalMethod = IActivityManager.class.getMethod("removeContentProviderExternal", String.class, IBinder.class);
+            Class<?> iActivityManagerClass = manager.getClass();
+            removeContentProviderExternalMethod = iActivityManagerClass.getMethod(
+                    "removeContentProviderExternal",
+                    String.class,
+                    IBinder.class);
         }
         return removeContentProviderExternalMethod;
-    }
-
-   
-    private Method getRemoveContentProviderExternalMethod() throws NoSuchMethodException {
-        if (removeContentProviderExternalMethod == null) {
-            removeContentProviderExternalMethod = manager.getClass().getMethod("removeContentProviderExternal", String.class, IBinder.class);
-        }
-        return removeContentProviderExternalMethod;
-    }
-
-    @TargetApi(Build.VERSION_CODES.Q)
-    private ContentProvider getContentProviderExternal(String name, IBinder token) {
-        try {
-            Method method = getGetContentProviderExternalMethod();
-            Object[] args;
-            if (getContentProviderExternalMethodNewVersion) {
-                // new version
-                args = new Object[]{name, FakeContext.ROOT_UID, token, null};
-            } else {
-                // old version
-                args = new Object[]{name, FakeContext.ROOT_UID, token};
-            }
-            // ContentProviderHolder providerHolder = getContentProviderExternal(...);
-            Object providerHolder = method.invoke(manager, args);
-            if (providerHolder == null) {
-                return null;
-            }
-            // IContentProvider provider = providerHolder.provider;
-            Field providerField = providerHolder.getClass().getDeclaredField("provider");
-            providerField.setAccessible(true);
-            Object provider = providerField.get(providerHolder);
-            if (provider == null) {
-                return null;
-            }
-            return new ContentProvider(this, provider, name, token);
-        } catch (ReflectiveOperationException e) {
-            Ln.e("Could not invoke method", e);
-            return null;
-        }
-    }
-
-    void removeContentProviderExternal(String name, IBinder token) {
-        try {
-            Method method = getRemoveContentProviderExternalMethod();
-            method.invoke(manager, name, token);
-        } catch (ReflectiveOperationException e) {
-            Ln.e("Could not invoke method", e);
-        }
-    }
-
-    public ContentProvider createSettingsProvider() {
-        return getContentProviderExternal("settings", new Binder());
     }
 
     private Method getStartActivityAsUserMethod() throws NoSuchMethodException, ClassNotFoundException {
         if (startActivityAsUserMethod == null) {
             Class<?> iApplicationThreadClass = Class.forName("android.app.IApplicationThread");
-            Class<?> profilerInfo = Class.forName("android.app.ProfilerInfo");
+            Class<?> profilerInfoClass = Class.forName("android.app.ProfilerInfo");
             startActivityAsUserMethod = manager.getClass()
-                    .getMethod("startActivityAsUser", iApplicationThreadClass, String.class, Intent.class, String.class, IBinder.class, String.class,
-                            int.class, int.class, profilerInfo, Bundle.class, int.class);
+                    .getMethod("startActivityAsUser",
+                            iApplicationThreadClass,
+                            String.class,
+                            Intent.class,
+                            String.class,
+                            IBinder.class,
+                            String.class,
+                            int.class,
+                            int.class,
+                            profilerInfoClass,
+                            Bundle.class,
+                            int.class);
         }
         return startActivityAsUserMethod;
     }
@@ -192,7 +171,7 @@ public final class ActivityManager {
                     /* bOptions */ null,
                     /* userId */ /* UserHandle.USER_CURRENT */ -2);
         } catch (Throwable e) {
-            Ln.e("Could not invoke method", e);
+            Ln.e("Could not invoke startActivity", e);
             return 0;
         }
     }
@@ -209,7 +188,7 @@ public final class ActivityManager {
             Method method = getForceStopPackageMethod();
             method.invoke(manager, packageName, /* userId */ /* UserHandle.USER_CURRENT */ -2);
         } catch (Throwable e) {
-            Ln.e("Could not invoke method", e);
+            Ln.e("Could not invoke forceStopPackage", e);
         }
     }
 }
