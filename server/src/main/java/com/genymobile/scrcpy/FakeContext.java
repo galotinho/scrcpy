@@ -1,37 +1,29 @@
 package com.genymobile.scrcpy;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.content.AttributionSource;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.ContentResolver;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.Process;
-import android.app.ActivityThread;
-import android.content.ContentProvider;
-import android.content.ContentResolver;
-import android.content.IContentProvider;
-import android.media.AudioManager;
-import android.os.Binder;
-import android.os.IBinder;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-import android.annotation.SuppressLint;
-import com.genymobile.scrcpy.Workarounds;
-
-// Se Ln está no pacote util, corrija a importação
-// import com.genymobile.scrcpy.util.Ln;
-
 import com.genymobile.scrcpy.Ln;
+import com.genymobile.scrcpy.Workarounds;
+import com.genymobile.scrcpy.wrappers.ApplicationContentResolver;
 
 public final class FakeContext extends ContextWrapper {
 
     public static final String PACKAGE_NAME = "com.android.shell";
     public static final int ROOT_UID = 0; // Like android.os.Process.ROOT_UID, but before API 29
+
     private final ApplicationContentResolver mContentResolver;
     private static boolean isAudioManagerPatched = false;
-
 
     private static final FakeContext INSTANCE = new FakeContext();
 
@@ -41,9 +33,21 @@ public final class FakeContext extends ContextWrapper {
 
     private FakeContext() {
         super(Workarounds.getSystemContext());
-        mContentResolver = new ApplicationContentResolver(this, (ActivityThread) Workarounds.ACTIVITY_THREAD);
+
+        // Obter ActivityThread via reflexão
+        Object activityThread = getActivityThread();
+        mContentResolver = new ApplicationContentResolver(this, activityThread);
     }
 
+    private Object getActivityThread() {
+        try {
+            Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
+            Method currentActivityThreadMethod = activityThreadClass.getMethod("currentActivityThread");
+            return currentActivityThreadMethod.invoke(null);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to get ActivityThread", e);
+        }
+    }
 
     @Override
     public String getPackageName() {
@@ -80,8 +84,8 @@ public final class FakeContext extends ContextWrapper {
             return mContentResolver;
         } catch (Exception e) {
             Ln.e("getContentResolver Exception", e);
+            return super.getContentResolver();
         }
-        return super.getContentResolver();
     }
 
     @Override
@@ -95,7 +99,6 @@ public final class FakeContext extends ContextWrapper {
         }
         return service;
     }
-
 
     @SuppressLint("SoonBlockedPrivateApi")
     private void patchAudioManagerContext(Object service) {
@@ -116,6 +119,4 @@ public final class FakeContext extends ContextWrapper {
             Ln.e("patchAudioManagerContext Exception", e);
         }
     }
-
-
 }
